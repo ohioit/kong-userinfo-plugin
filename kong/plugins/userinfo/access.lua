@@ -1,10 +1,12 @@
 local cache = require "kong.tools.database_cache"
 local responses = require "kong.tools.responses"
 local singletons = require "kong.singletons"
-local cjson = require "cjson"
+local printable_mt = require "kong.tools.printable"
+local ldap = require "lua_ldap"
 
-local json_decode = cjson.decode
+local ngx_get_headers = ngx.req.get_headers
 local ngx_set_header = ngx.req.set_header
+local ldap_connect = ldap.open_simple
 
 local USERINFO_HEADER_BASENAME = "x-userinfo"
 local CACHE_KEYS = {
@@ -13,47 +15,79 @@ local CACHE_KEYS = {
 
 local _M = {}
 
-local userinfo_key = function(credential_id)
-    return CACHE_KEYS.USERINFO_CACHE_KEY .. ":" .. credential_id
+local userinfo_key = function(username)
+    return CACHE_KEYS.USERINFO_CACHE_KEY .. ":" .. username
 end
 
-local simplify_userinfo = function(userinfo)
-    simpleinfo = {}
-
-    if userinfo.memberof then
-        simpleinfo.groups = table.concat(userinfo.memberof, ",")
-    end
-    
-    return simpleinfo
+local get_authenticated_user = function()
+    return ngx_get_headers()['authenticated_userid']
 end
 
-local load_userinfo = function(credential_id)
-    local userinfo, err = dao.userinfo.credentials:find_all({ credential_id = credential_id })
+local load_userinfo = function(username, conf)
+    local uri = "ldap"
 
-    if err then
-        return nil, err
+    if conf.start_tls then
+        uri = uri .. "s"
     end
 
-    return simplify_userinfo(userinfo[1])
+    uri = uri .. "://" .. conf.ldap_host .. ":" .. conf.ldap_port
+
+    ngx.log(ngx.DEBUG, "Connecting to", uri)
+    local ldap = ldap_connect({
+        uri = uri,
+        who = conf.bind_dn,
+        password = conf.bind_password,
+        starttls = conf.start_tls
+    })
+
+    if not ldap then
+        return nil, "unable to connect to LDAP server " .. uri
+    end
+
+    local result = nil
+    local query = {
+        attrs = conf.attributes.split(","),
+        base = conf.base_dn,
+        filter = conf.search_filter.gsub("{user}", username),
+        sizelimit = 2,
+        timeout = conf.timeout
+    }
+    setmetatable(query, printable_mt)
+    ngx.log(ngx.DEBUG, "Searching for ", query)
+    for dn, attributes in ldap:search(query) do
+        if result then
+            return nil,  "multiple entries for " .. username .. " found"
+        end
+
+        result = attributes
+    end
+
+    ldap:close()
+
+    return result, nil
 end
 
-local get_header_name(field)
+local get_header_name = function(field)
     return USERINFO_HEADER_BASENAME .. "-" .. field
 end
 
 local set_headers = function(userinfo)
     for name, value in pairs(userinfo) do
+        if type(value) == "table" then
+            value = string.join(table, ",")
+        end
+
         ngx.log(ngx.DEBUG, "Setting header ", name, " to ", value)
         ngx_set_header(get_header_name(name), value)
     end
 end
 
 function _M.execute(conf)
-    local credential = ngx.ctx.authenticated_credential
-    if ngx.ctx.authenticated_credential then
-        ngx.log(ngx.DEBUG, "Got authenticated credential: ", credential)
+    local user = get_authenticated_user()
+    if user then
+        ngx.log(ngx.DEBUG, "Got authenticated user: ", user)
 
-        local userinfo, err = cache.get_or_set(userinfo_key(credential.id), nil, load_userinfo, credential.id)
+        local userinfo, err = cache.get_or_set(userinfo_key(user), nil, load_userinfo, user, conf)
 
         if err then
             return responses.send_HTTP_INTERNAL_SERVER_ERROR(err)
@@ -61,9 +95,10 @@ function _M.execute(conf)
 
         if userinfo then
             ngx.log(ngx.DEBUG, "Loaded user info: ", userinfo)
-            userinfo = json_decode(userinfo)
             set_headers(userinfo)
         end
+    else
+        ngx.log(ngx.DEBUG, "No user authenticated.")
     end
 
     return true
