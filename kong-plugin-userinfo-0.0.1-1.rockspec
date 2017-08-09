@@ -21,7 +21,6 @@ build = {
     modules = {
         ["kong.plugins."..pluginName..".access"] = "kong/plugins/"..pluginName.."/access.lua",
         ["kong.plugins."..pluginName..".handler"] = "kong/plugins/"..pluginName.."/handler.lua",
-        ["kong.plugins."..pluginName..".hooks"] = "kong/plugins/"..pluginName.."/hooks.lua",
         ["kong.plugins."..pluginName..".schema"] = "kong/plugins/"..pluginName.."/schema.lua"
     }
 }

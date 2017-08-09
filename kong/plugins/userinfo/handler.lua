@@ -12,4 +12,6 @@ function UserinfoHandler:access(conf)
     access.execute(conf)
 end
 
+UserinfoHandler.PRIORITY = 850
+
 return UserinfoHandler

@@ -8,9 +8,12 @@ local ngx_get_headers = ngx.req.get_headers
 local ngx_set_header = ngx.req.set_header
 local ldap_connect = ldap.open_simple
 
+local UPSTREAM_USERNAME_HEADER = "x-authenticated-userid"
 local USERINFO_HEADER_BASENAME = "x-userinfo"
+local LDAP_FILTER_USERNAME_VARIABLE = "{user}"
+local LDAP_SEARCH_SCOPE = "subtree"
 local CACHE_KEYS = {
-    USERINFO_CACHE_KEY = "userinfo_credentials"
+    USERINFO_CACHE_KEY = "userinfo"
 }
 
 local _M = {}
@@ -20,40 +23,32 @@ local userinfo_key = function(username)
 end
 
 local get_authenticated_user = function()
-    return ngx_get_headers()['authenticated_userid']
+    return ngx_get_headers()[UPSTREAM_USERNAME_HEADER]
 end
 
 local load_userinfo = function(username, conf)
-    local uri = "ldap"
-
-    if conf.start_tls then
-        uri = uri .. "s"
-    end
-
-    uri = uri .. "://" .. conf.ldap_host .. ":" .. conf.ldap_port
-
-    ngx.log(ngx.DEBUG, "Connecting to", uri)
-    local ldap = ldap_connect({
-        uri = uri,
+    local ldap, err = ldap_connect({
+        uri = conf.ldap_uri,
         who = conf.bind_dn,
         password = conf.bind_password,
         starttls = conf.start_tls
     })
 
     if not ldap then
-        return nil, "unable to connect to LDAP server " .. uri
+        return nil, "unable to connect to LDAP server " .. conf.ldap_uri .. ": " .. err
     end
 
     local result = nil
     local query = {
-        attrs = conf.attributes.split(","),
+        attrs = conf.attributes,
         base = conf.base_dn,
-        filter = conf.search_filter.gsub("{user}", username),
+        scope = LDAP_SEARCH_SCOPE,
+        filter = string.gsub(conf.search_filter, LDAP_FILTER_USERNAME_VARIABLE, username),
         sizelimit = 2,
         timeout = conf.timeout
     }
-    setmetatable(query, printable_mt)
-    ngx.log(ngx.DEBUG, "Searching for ", query)
+
+    result = nil
     for dn, attributes in ldap:search(query) do
         if result then
             return nil,  "multiple entries for " .. username .. " found"
@@ -74,10 +69,9 @@ end
 local set_headers = function(userinfo)
     for name, value in pairs(userinfo) do
         if type(value) == "table" then
-            value = string.join(table, ",")
+            value = table.concat(value, ",")
         end
 
-        ngx.log(ngx.DEBUG, "Setting header ", name, " to ", value)
         ngx_set_header(get_header_name(name), value)
     end
 end
@@ -85,20 +79,15 @@ end
 function _M.execute(conf)
     local user = get_authenticated_user()
     if user then
-        ngx.log(ngx.DEBUG, "Got authenticated user: ", user)
-
-        local userinfo, err = cache.get_or_set(userinfo_key(user), nil, load_userinfo, user, conf)
+        local userinfo, err = cache.get_or_set(userinfo_key(user), conf.cache_ttl, load_userinfo, user, conf)
 
         if err then
             return responses.send_HTTP_INTERNAL_SERVER_ERROR(err)
         end
 
         if userinfo then
-            ngx.log(ngx.DEBUG, "Loaded user info: ", userinfo)
             set_headers(userinfo)
         end
-    else
-        ngx.log(ngx.DEBUG, "No user authenticated.")
     end
 
     return true
