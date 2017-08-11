@@ -9,6 +9,8 @@ return {
         search_filter = {required = true, type = "string", default = "cn={user}"},
         cache_ttl = {required = true, type = "number", default = 60},
         timeout = {type = "number", default = 10000},
-        attributes = {required = true, type = "array"}
+        attributes = {required = true, type = "array"},
+        encode_attributes = {required = false, type="array"},
+        convert_rdn_to_rdns = {required = false, type="array"}
     }
 }

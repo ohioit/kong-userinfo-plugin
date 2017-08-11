@@ -21,6 +21,22 @@ Simply add the plugin to your API, or globally, and set the various options:
 - *Search filter*: A proper LDAP search filter in which `{user}` is replaced
                    with the value of the `x-authenticated-userid` header.
 - *Cache ttl*: For how long should results be cached before going back to LDAP?
+- *Encode attributes*: List of attributes, comma separated, to encode using
+                       MIME Base64. This is useful as the set of characters allowed
+                       in HTTP header values is limited. Any value that is a list
+                       will have each list item independantly encoded.
+- *Convert rdn to rdns*: This is a bit hacky. Since LDAP groups are often
+                         represented as DNs and commas are not allowed in HTTP
+                         header values (only as value separators), this allows
+                         for a human readible and more easily parsable representation
+                         of group values. The DN value is converted to a reverse
+                         DNS form, similar to Java. Additionally, immediately
+                         duplicate elements are collapsed, the RDNs are lowercased,
+                         any RDN with dots or values will be quoted. For example,
+                         consider the following transformation:
+
+                         `CN=system.admin,OU=groups,OU=ohio,DC=ohio,DC=edu`:
+                         `edu.ohio.groups.'system.admin'`
 - *Timeout*: How long to wait for search results before timing out.
 - *Bind dn*: DN with which to bind to the LDAP database. Note that binding as
              the user is not currently supported.
