@@ -35,8 +35,8 @@ Simply add the plugin to your API, or globally, and set the various options:
                          any RDN with dots or values will be quoted. For example,
                          consider the following transformation:
 
-                         `CN=system.admin,OU=groups,OU=ohio,DC=ohio,DC=edu`:
-                         `edu.ohio.groups.'system.admin'`
+                         CN=system.admin,OU=groups,OU=ohio,DC=ohio,DC=edu:
+                         edu.ohio.groups.'system.admin'
 - *Timeout*: How long to wait for search results before timing out.
 - *Bind dn*: DN with which to bind to the LDAP database. Note that binding as
              the user is not currently supported.
