@@ -7,6 +7,7 @@ local ldap = require "lua_ldap"
 
 local ngx_get_headers = ngx.req.get_headers
 local ngx_set_header = ngx.req.set_header
+local ngx_clear_header = ngx.req.clear_header
 local ngx_re_gmatch = ngx.re.gmatch
 local ldap_connect = ldap.open_simple
 local base64_encode = ngx.encode_base64
@@ -39,13 +40,9 @@ convert_value = function(name, value, conf)
     else
         if table_contains(conf.convert_rdn_to_rdns, name) then
             converted = {}
-            setmetatable(converted, printable_mt)
-            for piece in ngx_re_gmatch(value, "=([^,]+),?", "jo") do
-                piece = string.gsub(string.lower(piece[1]), "'", "\\'")
 
-                if string.find(piece, "[ \\.]") then
-                    piece = "'" .. piece .. "'"
-                end
+            for piece in ngx_re_gmatch(value, "=([^,]+),?", "jo") do
+                piece = string.gsub(string.lower(piece[1]), " ", "-")
 
                 if converted[1] ~= piece then
                     table.insert(converted, 1, piece)
@@ -118,6 +115,14 @@ local set_headers = function(userinfo)
 end
 
 function _M.execute(conf)
+    local headers = ngx_get_headers()
+
+    for i = 1, #headers do
+        if string.sub(headers[i],1,#USERINFO_HEADER_BASENAME) == USERINFO_HEADER_BASENAME then
+            ngx_clear_header(headers[i])
+        end
+    end
+
     local user = get_authenticated_user()
     if user then
         local userinfo, err = cache.get_or_set(userinfo_key(user), conf.cache_ttl, load_userinfo, user, conf)
