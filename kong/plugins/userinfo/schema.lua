@@ -11,6 +11,7 @@ return {
         timeout = {type = "number", default = 10000},
         attributes = {required = true, type = "array"},
         encode_attributes = {required = false, type="array"},
-        convert_rdn_to_rdns = {required = false, type="array"}
+        convert_rdn_to_rdns = {required = false, type="array"},
+        deny_unknown_users = {required = true, type="boolean", default = false}
     }
 }

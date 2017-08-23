@@ -1,17 +1,18 @@
-local cache = require "kong.tools.database_cache"
 local responses = require "kong.tools.responses"
 local singletons = require "kong.singletons"
-local printable_mt = require "kong.tools.printable"
 local utils = require "kong.tools.utils"
 local ldap = require "lua_ldap"
+local pl_stringx = require "pl.stringx"
 
 local ngx_get_headers = ngx.req.get_headers
 local ngx_set_header = ngx.req.set_header
 local ngx_clear_header = ngx.req.clear_header
 local ngx_re_gmatch = ngx.re.gmatch
+local unescape_uri = ngx.unescape_uri
 local ldap_connect = ldap.open_simple
 local base64_encode = ngx.encode_base64
 local table_contains = utils.table_contains
+local str_replace = pl_stringx.replace
 
 local UPSTREAM_USERNAME_HEADER = "x-authenticated-userid"
 local USERINFO_HEADER_BASENAME = "x-userinfo"
@@ -28,7 +29,7 @@ local userinfo_key = function(username)
 end
 
 local get_authenticated_user = function()
-    return ngx_get_headers()[UPSTREAM_USERNAME_HEADER]
+    return unescape_uri(ngx_get_headers()[UPSTREAM_USERNAME_HEADER])
 end
 
 local convert_value
@@ -77,7 +78,7 @@ local load_userinfo = function(username, conf)
         attrs = conf.attributes,
         base = conf.base_dn,
         scope = LDAP_SEARCH_SCOPE,
-        filter = string.gsub(conf.search_filter, LDAP_FILTER_USERNAME_VARIABLE, username),
+        filter = str_replace(conf.search_filter, LDAP_FILTER_USERNAME_VARIABLE, username),
         sizelimit = 2,
         timeout = conf.timeout
     }
@@ -92,6 +93,10 @@ local load_userinfo = function(username, conf)
     end
 
     ldap:close()
+
+    if not result then
+        return nil, nil
+    end
 
     for key, value in pairs(result) do
         result[key] = convert_value(key, value, conf)
@@ -125,7 +130,11 @@ function _M.execute(conf)
 
     local user = get_authenticated_user()
     if user then
-        local userinfo, err = cache.get_or_set(userinfo_key(user), conf.cache_ttl, load_userinfo, user, conf)
+        local opts = {
+            ttl = conf.cache_ttl,
+            neg_ttl = conf.cache_ttl
+        }
+        local userinfo, err = singletons.cache:get(userinfo_key(user), opts, load_userinfo, user, conf)
 
         if err then
             return responses.send_HTTP_INTERNAL_SERVER_ERROR(err)
@@ -133,6 +142,8 @@ function _M.execute(conf)
 
         if userinfo then
             set_headers(userinfo)
+        elseif conf.deny_unknown_users then
+            return responses.send_HTTP_FORBIDDEN()
         end
     end
 
